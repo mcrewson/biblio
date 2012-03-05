@@ -41,8 +41,9 @@ def read_metadata (filename):
     parser = find_parser(filetype)
     return parser.reader(filename)
 
-def read_processed_metadta (filename):
-    filetype = identify_file(filename)
+def read_processed_metadata (filename, filetype=None):
+    if filetype is None:
+        filetype = identify_file(filename)
     if filetype is None:
         return None
 

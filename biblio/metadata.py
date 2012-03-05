@@ -74,4 +74,14 @@ class RestrictedMetadata (Metadata):
         return super(RestrictedMetadata, self).__delattr__(key)
 
 ##############################################################################
+
+class EbookMetadata (RestrictedMetadata):
+
+    _fields = ('title','title_sort','authors','author_sort','contributors',
+               'series','series_index','languages','publisher','rights',
+               'date_published','date_original','identifiers','description',
+               'tags',
+              )
+
+##############################################################################
 ## THE END

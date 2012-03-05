@@ -195,10 +195,11 @@ from __future__ import with_statement
 from contextlib import closing
 import re, struct
 
-from biblio.metadata              import Metadata, Storage
+from biblio.metadata              import EbookMetadata, Metadata, Storage
 from biblio.identifiers.filetypes import MOBI
 from biblio.parsers               import parser
 from biblio.parsers.pdb           import PDBException, read_pdb_metadata
+from biblio.util.xmlunicode       import replace_entities
 
 ##############################################################################
 
@@ -323,24 +324,256 @@ def _parse_exth_header (raw):
 
 ##############################################################################
 
-class MOBIEbook (object):
+def process_mobi_metadata (metadata):
+    ebook = EbookMetadata(metadata.filetype)
 
-    def to_ebook (metadata):
-        ebook = EbookMetadata(metadata.filetype)
-        try:
-            ebook.title = raw_metadata.mobi.fullname
-        except AttributeError:
-            ebook.title = re.sub('[^-A-Za-z0-9\"";:., ]+', '_', raw_metadata.pdb.name.replace('\x00', ''))
-
+    if 'mobi' not in metadata:
         return ebook
 
-    def to_metadata (ebook):
-        pass
+    # Determine the codec used for strings. Defaults to 'cp1252'
+    codec = 'cp1252'
+    if 'text_encoding' in metadata.mobi:
+        try:
+            codec = {1252:'cp1252', 65001:'utf-8'}[metadata.mobi.text_encoding]
+        except (IndexError, KeyError):
+            print "Unknown codepage %d. Assuming '%s'" % (metadata.mobi.text_encoding, codec)
+
+    try:
+        ebook.title = metadata.mobi.fullname.decode(codec, 'replace')
+    except AttributeError:
+        ebook.title = re.sub('[^-A-Za-z0-9\"";:., ]+', '_', metadata.pdb.name.replace('\x00', ''))
+
+    ebook.setdefault('languages', []).append(mobi2iana_language(metadata.mobi.locale))
+
+    if 'exth' in metadata.mobi:
+        for record in metadata.mobi.exth.records:
+            if record.type == 100:
+                from biblio.ebook import parse_ebook_authors
+                authors = parse_ebook_authors(record.data.decode(codec, 'ignore').strip())
+                ebook.setdefault('authors', []).extend(authors)
+            elif record.type == 101:
+                ebook.publisher = record.data.decode(codec, 'ignore').strip()
+            elif record.type == 103:
+                ebook.description = record.data.decode(codec, 'ignore')
+            elif record.type == 104:
+                ebook.setdefault('identifiers', {})['isbn'] = record.data.decode(codec, 'ignore').strip().replace('-', '')
+            elif record.type == 105:
+                tags = [ t.strip() for t in record.data.decode(codec, 'ignore').split(';') ]
+                ebook.setdefault('tags', []).extend(tags)
+                ebook.tags = list(set(ebook.tags))
+            elif record.type == 106:
+                from biblio.ebook import parse_ebook_date
+                ebook.date_published = parse_ebook_date(record.data.decode(codec, 'ignore'))
+            elif record.type == 108:
+                pass # contributor
+            elif record.type == 109:
+                ebook.rights = record.data.decode(codec, 'ignore')
+            elif record.type == 503:
+                ebook.title = record.data.decode(codec, 'ignore')
+
+    if ebook.title:
+        ebook.title = replace_entities(ebook.title, codec)
+
+    return ebook
+
+##############################################################################
+
+IANA_MOBI = { None: {None: (0, 0)},
+              'af': {None: (54, 0)},
+              'ar': {None: (1, 0),
+                     'AE': (1, 56),
+                     'BH': (1, 60),
+                     'DZ': (1, 20),
+                     'EG': (1, 12),
+                     'JO': (1, 44),
+                     'KW': (1, 52),
+                     'LB': (1, 48),
+                     'MA': (1, 24),
+                     'OM': (1, 32),
+                     'QA': (1, 64),
+                     'SA': (1, 4),
+                     'SY': (1, 40),
+                     'TN': (1, 28),
+                     'YE': (1, 36)},
+              'as': {None: (77, 0)},
+              'az': {None: (44, 0)},
+              'be': {None: (35, 0)},
+              'bg': {None: (2, 0)},
+              'bn': {None: (69, 0)},
+              'ca': {None: (3, 0)},
+              'cs': {None: (5, 0)},
+              'da': {None: (6, 0)},
+              'de': {None: (7, 0),
+                     'AT': (7, 12),
+                     'CH': (7, 8),
+                     'LI': (7, 20),
+                     'LU': (7, 16)},
+              'el': {None: (8, 0)},
+              'en': {None: (9, 0),
+                     'AU': (9, 12),
+                     'BZ': (9, 40),
+                     'CA': (9, 16),
+                     'GB': (9, 8),
+                     'IE': (9, 24),
+                     'JM': (9, 32),
+                     'NZ': (9, 20),
+                     'PH': (9, 52),
+                     'TT': (9, 44),
+                     'US': (9, 4),
+                     'ZA': (9, 28),
+                     'ZW': (9, 48)},
+              'es': {None: (10, 0),
+                     'AR': (10, 44),
+                     'BO': (10, 64),
+                     'CL': (10, 52),
+                     'CO': (10, 36),
+                     'CR': (10, 20),
+                     'DO': (10, 28),
+                     'EC': (10, 48),
+                     'ES': (10, 4),
+                     'GT': (10, 16),
+                     'HN': (10, 72),
+                     'MX': (10, 8),
+                     'NI': (10, 76),
+                     'PA': (10, 24),
+                     'PE': (10, 40),
+                     'PR': (10, 80),
+                     'PY': (10, 60),
+                     'SV': (10, 68),
+                     'UY': (10, 56),
+                     'VE': (10, 32)},
+              'et': {None: (37, 0)},
+              'eu': {None: (45, 0)},
+              'fa': {None: (41, 0)},
+              'fi': {None: (11, 0)},
+              'fo': {None: (56, 0)},
+              'fr': {None: (12, 0),
+                     'BE': (12, 8),
+                     'CA': (12, 12),
+                     'CH': (12, 16),
+                     'FR': (12, 4),
+                     'LU': (12, 20),
+                     'MC': (12, 24)},
+              'gu': {None: (71, 0)},
+              'he': {None: (13, 0)},
+              'hi': {None: (57, 0)},
+              'hr': {None: (26, 0)},
+              'hu': {None: (14, 0)},
+              'hy': {None: (43, 0)},
+              'id': {None: (33, 0)},
+              'is': {None: (15, 0)},
+              'it': {None: (16, 0),
+                     'CH': (16, 8),
+                     'IT': (16, 4)},
+              'ja': {None: (17, 0)},
+              'ka': {None: (55, 0)},
+              'kk': {None: (63, 0)},
+              'kn': {None: (75, 0)},
+              'ko': {None: (18, 0)},
+              'kok': {None: (87, 0)},
+              'lt': {None: (39, 0)},
+              'lv': {None: (38, 0)},
+              'mk': {None: (47, 0)},
+              'ml': {None: (76, 0)},
+              'mr': {None: (78, 0)},
+              'ms': {None: (62, 0)},
+              'mt': {None: (58, 0)},
+              'ne': {None: (97, 0)},
+              'nl': {None: (19, 0),
+                     'BE': (19, 8)},
+              'no': {None: (20, 0)},
+              'or': {None: (72, 0)},
+              'pa': {None: (70, 0)},
+              'pl': {None: (21, 0)},
+              'pt': {None: (22, 0),
+                     'BR': (22, 4),
+                     'PT': (22, 8)},
+              'rm': {None: (23, 0)},
+              'ro': {None: (24, 0)},
+              'ru': {None: (25, 0)},
+              'sa': {None: (79, 0)},
+              'se': {None: (59, 0)},
+              'sk': {None: (27, 0)},
+              'sl': {None: (36, 0)},
+              'sq': {None: (28, 0)},
+              'sr': {None: (26, 12),
+                     'RS': (26, 12)},
+              'st': {None: (48, 0)},
+              'sv': {None: (29, 0),
+                     'FI': (29, 8)},
+              'sw': {None: (65, 0)},
+              'ta': {None: (73, 0)},
+              'te': {None: (74, 0)},
+              'th': {None: (30, 0)},
+              'tn': {None: (50, 0)},
+              'tr': {None: (31, 0)},
+              'ts': {None: (49, 0)},
+              'tt': {None: (68, 0)},
+              'uk': {None: (34, 0)},
+              'ur': {None: (32, 0)},
+              'uz': {None: (67, 0),
+                     'UZ': (67, 8)},
+              'vi': {None: (42, 0)},
+              'wen': {None: (46, 0)},
+              'xh': {None: (52, 0)},
+              'zh': {None: (4, 0),
+                     'CN': (4, 8),
+                     'HK': (4, 12),
+                     'SG': (4, 16),
+                     'TW': (4, 4)},
+              'zu': {None: (53, 0)} }
+
+def iana2mobi_language(icode):
+    langdict, subtags = IANA_MOBI[None], []
+    if icode:
+        subtags = list(icode.split('-'))
+        while len(subtags) > 0:
+            lang = subtags.pop(0).lower()
+            lang = lang_as_iso639_1(lang)
+            if lang and lang in IANA_MOBI:
+                langdict = IANA_MOBI[lang]
+                break
+
+    mcode = langdict[None]
+    while len(subtags) > 0:
+        subtag = subtags.pop(0)
+        if subtag not in langdict:
+            subtag = subtag.title()
+        if subtag not in langdict:
+            subtag = subtag.upper()
+        if subtag in langdict:
+            mcode = langdict[subtag]
+            break
+    return pack('>HBB', 0, mcode[1], mcode[0])
+
+def mobi2iana_language (mobi_locale):
+    langcode = mobi_locale & 0xff
+    sublangcode = (mobi_locale >> 10) & 0xff
+
+    prefix = suffix = None
+    for code, d in IANA_MOBI.items():
+        for subcode, t in d.items():
+            cc, cl = t
+            if cc == langcode:
+                prefix = code
+            if cl == sublangcode:
+                suffix = subcode.lower() if subcode else None
+                break
+        if prefix is not None:
+            break
+    if prefix is None:
+        return 'und'
+    if suffix is None:
+        return prefix
+    return prefix + '-' + suffix
 
 ##############################################################################
 
 def initialize_parser ():
-    return parser(filetype=MOBI, reader=read_mobi_metadata, writer=None, processor=None)
+    return parser(filetype=MOBI, 
+                  reader=read_mobi_metadata, 
+                  writer=None, 
+                  processor=process_mobi_metadata)
 
 ##############################################################################
 ## THE END

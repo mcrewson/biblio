@@ -14,21 +14,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from biblio.metadata import RestrictedMetadata
-from biblio.identify import identify_file
-from biblio.identify.filetypes import is_ebook
-from biblio.parsers  import find_parser
+from datetime import datetime
+from dateutil.tz import tzlocal, tzutc
+import re
 
-##############################################################################
-
-class EbookMetadata (RestrictedMetadata):
-
-    _fields = ('title','title_sort','authors','author_sort','contributors',
-               'series','series_index','language','publisher',
-               'date_published','date_original','identifiers','description',
-               'tags',
-              )
-
+from biblio.identifiers import identify_file
+from biblio.identifiers.filetypes import is_ebook
+from biblio.parsers  import read_processed_metadata
 
 ##############################################################################
 
@@ -37,42 +29,35 @@ def ebook_metadata (filename):
     if not is_ebook(filetype):
         return None
 
-    processor = find_ebook_processor (filetype)
-    if processor is None:
-        return None
-
-    parser = find_parser(filetype)
-    if parser is None:
-        return None
-
-    return processor().to_ebook(parser().read_metadata(filename))
+    return read_processed_metadata(filename, filetype=filetype)
 
 ##############################################################################
 
-__builtin_processors = {}
-__extra_processors   = {}
+AUTHORS_PATTERN = re.compile(r'(?i),?\s+(and|with|&)\s+')
 
-class ProcessorException (Exception):
-    pass
+def parse_ebook_authors (authors_string):
+    if not authors_string:
+        return []
+    authors_string = AUTHORS_PATTERN.sub(';', authors_string)
+    authors = [ a.strip() for a in authors_string.split(';') ]
+    return [ a for a in authors if a ]
 
-def find_ebook_processor (filetype):
-    global __builtin_processors, __extra_processors
+##############################################################################
 
-    if filetype is None: return None
-    processor = __extra_processors.get(filetype)
-    if processor is None:
-        processor = __builtin_processors.get(filetype)
-    return processor
+UNDEFINED_DATE = datetime(101,1,1, tzinfo=tzutc())
 
-def add_processor (processor, filetype, builtin=False):
-    global __builtin_processors, __extra_processors
+def parse_ebook_date (date_string, assume_utc=False, as_utc=True):
+    from dateutil.parser import parse
+    if not date_string:
+        return UNDEFINED_DATE
+    dt = parse(date_string)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=tzutc() if assume_utc else tzlocal())
+    return dt.astimezone(tzutc() if as_utc else tzlocal()).date()
 
-    if builtin:
-        processors = __builtin_processors
-    else:
-        processors = __extra_processors
-
-    processors[filetype] = processor
-
+##############################################################################
+##############################################################################
+##############################################################################
+##############################################################################
 ##############################################################################
 ## THE END
