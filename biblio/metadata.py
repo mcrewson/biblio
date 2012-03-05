@@ -49,4 +49,29 @@ class Metadata (Storage):
         self['filetype'] = filetype
 
 ##############################################################################
+
+class RestrictedMetadata (Metadata):
+
+    _fields = ()
+
+    def _check_field (self, field):
+        if field != 'filetype' and field not in self._fields:
+            raise AttributeError("'%s' is not a valid attribute for %s" % (field, self.__class__.__name__))
+
+    def __getattr__ (self, key):
+        self._check_field(key)
+        try:
+            return super(RestrictedMetadata, self).__getattr__(key)
+        except AttributeError:
+            return None
+
+    def __setattr__ (self, key, value):
+        self._check_field(key)
+        return super(RestrictedMetadata, self).__setattr__(key, value)
+
+    def __delattr__ (self, key):
+        self._check_field(key)
+        return super(RestrictedMetadata, self).__delattr__(key)
+
+##############################################################################
 ## THE END

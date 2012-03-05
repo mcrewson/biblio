@@ -3,14 +3,12 @@
 import sys, pprint
 sys.path.insert(0, '.')
 
-from biblio.parsers import find_parser
+from biblio.ebook import ebook_metadata
 
 for f in sys.argv[1:]:
-    parser = find_parser(f)
-    if parser is None:
-        print "%s: cannot identify this file" % f
+    m = ebook_metadata(f)
+    if m is None:
+        print "%s: not an ebook file" % f
         continue
 
-    p = parser()
-    m = p.read_metadata(f)
     print m

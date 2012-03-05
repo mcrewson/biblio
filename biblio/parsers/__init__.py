@@ -28,10 +28,9 @@ class ParserException (Exception):
 
 ##############################################################################
 
-def find_parser (filename):
+def find_parser (filetype):
     global __builtin_parsers, __extra_parsers
 
-    filetype = identify_file(filename)
     if filetype is None: return None
     parser = __extra_parsers.get(filetype)
     if parser is None:

@@ -192,9 +192,8 @@
 # a four-byte boundary
 
 from __future__ import with_statement
-
-import struct
 from contextlib import closing
+import re, struct
 
 from biblio.metadata           import Metadata, Storage
 from biblio.identify.filetypes import MOBI
@@ -211,6 +210,10 @@ class MobiException (PDBException):
 class MOBIParser (PDBParser):
 
     filetype = MOBI
+
+    def read_ebook_metadata (self, filename, raw_metadata=None):
+        if raw_metadata is None:
+            raw_metadata = self.read_metadata(filename)
 
     def read_metadata (self, filename, metadata=None):
         if metadata is None:
@@ -328,7 +331,23 @@ class MOBIParser (PDBParser):
 
 ##############################################################################
 
-add_parser (MOBIParser, MOBI, builtin=True)
+class MOBIEbook (object):
+
+    def to_ebook (metadata):
+        ebook = EbookMetadata(metadata.filetype)
+        try:
+            ebook.title = raw_metadata.mobi.fullname
+        except AttributeError:
+            ebook.title = re.sub('[^-A-Za-z0-9\"";:., ]+', '_', raw_metadata.pdb.name.replace('\x00', ''))
+
+        return ebook
+
+    def to_metadata (ebook):
+        pass
+
+##############################################################################
+
+add_parser (MOBIParser, MOBIEbook, MOBI, builtin=True)
 
 ##############################################################################
 ## THE END
