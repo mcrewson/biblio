@@ -45,7 +45,7 @@ GIF89A    = filetype('image.gif.89a'  , 'image/gif'    , 'GIF image, version 89a
 JPEG_JFIF = filetype('image.jpeg.jfif', 'image/jpeg'   , 'JPEG image, JFIF standard')
 JPEG_EXIF = filetype('image.jpeg.exif', 'image/jpeg'   , 'JPEG image, EXIF standard')
 PNG       = filetype('image.png'      , 'image/png'    , 'PNG image')
-SVG       = filetype('image.sbg'      , 'image/svg+xml', 'SVG image')
+SVG       = filetype('image.svg'      , 'image/svg+xml', 'SVG image')
 
 def is_image (ftype):
     return ftype.type.startswith('image.')

@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from biblio.identify import identify_file
+from biblio.identifiers import identify_file
 
 ##############################################################################
 
@@ -51,10 +51,11 @@ def add_parser (parser, filetype, builtin=False):
 
 ##############################################################################
 
-import biblio.parsers.epub
-import biblio.parsers.mobi
-import biblio.parsers.pdb
-import biblio.parsers.opf
+def donot_call_anymore ():
+    import biblio.parsers.epub
+    import biblio.parsers.mobi
+    import biblio.parsers.pdb
+    import biblio.parsers.opf
 
 ##############################################################################
 ## THE END
