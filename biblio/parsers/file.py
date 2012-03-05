@@ -20,16 +20,12 @@ from biblio.metadata import Metadata
 
 ##############################################################################
 
-class FileParser (object):
+def read_file_metadata (filename, metadata=None):
+    if metadata is None:
+        metadata = Metadata(None)
 
-    def read_metadata (self, filename, metadata=None):
-        if metadata is None:
-            metadata = Metadata(None)
-
-        #super(FileParser, self).read_metadata(filename, metadata)
-
-        metadata.file_status = os.stat(filename)
-        return metadata
+    metadata.file_status = os.stat(filename)
+    return metadata
 
 ##############################################################################
 ## THE END

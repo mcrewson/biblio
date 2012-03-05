@@ -95,11 +95,11 @@ from __future__ import with_statement
 import datetime, re, struct
 from contextlib import closing
 
-from biblio.metadata           import Metadata, Storage
-from biblio.identify.filetypes import PDB_EREADER, PDB_GUTENPALM, \
-                                      PDB_PALMDOC, PDB_PLUCKER
-from biblio.parsers            import add_parser, ParserException
-from biblio.parsers.file       import FileParser
+from biblio.metadata              import Metadata, Storage
+from biblio.identifiers.filetypes import PDB_EREADER, PDB_GUTENPALM, \
+                                         PDB_PALMDOC, PDB_PLUCKER
+from biblio.parsers               import ParserException, parser
+from biblio.parsers.file          import read_file_metadata
 
 ##############################################################################
 
@@ -119,54 +119,52 @@ PDB_TIMESTAMP_OFFSET = long(-2082844800.0)
 
 ##############################################################################
 
-class PDBParser (FileParser):
+def read_pdb_metadata (filename, metadata=None):
+    if metadata is None:
+        metadata = Metadata(None)
+    read_file_metadata(filename, metadata)
 
-    def read_metadata (self, filename, metadata=None):
-        if metadata is None:
-            metadata = Metadata(self.filetype)
-        super(PDBParser, self).read_metadata(filename, metadata)
+    with closing(open(filename, 'rb')) as stream:
+        metadata.pdb = _parse_pdb_header(stream)
 
-        with closing(open(filename, 'rb')) as stream:
-            metadata.pdb = self._parse_pdb_header(stream)
+    return metadata
 
-        return metadata
+def _parse_pdb_header (stream):
+    pdbheader = Storage()
 
-    def _parse_pdb_header (self, stream):
-        pdbheader = Storage()
+    # PDB fields
+    pdbheader.name, \
+    pdbheader.attributes, \
+    pdbheader.version, \
+    pdbheader.creation_timestamp, \
+    pdbheader.modification_timestamp, \
+    pdbheader.last_backup_timestamp, \
+    pdbheader.modification_number, \
+    pdbheader.appinfo_offset, \
+    pdbheader.sortinfo_offset, \
+    pdbheader.type, \
+    pdbheader.creator, \
+    pdbheader.uniqueidseed, \
+    pdbheader.nextrecordlistid, \
+    pdbheader.num_records, \
+        = struct.unpack('>32sHHLLLLLL4s4sLLH', stream.read(78))
 
-        # PDB fields
-        pdbheader.name, \
-        pdbheader.attributes, \
-        pdbheader.version, \
-        pdbheader.creation_timestamp, \
-        pdbheader.modification_timestamp, \
-        pdbheader.last_backup_timestamp, \
-        pdbheader.modification_number, \
-        pdbheader.appinfo_offset, \
-        pdbheader.sortinfo_offset, \
-        pdbheader.type, \
-        pdbheader.creator, \
-        pdbheader.uniqueidseed, \
-        pdbheader.nextrecordlistid, \
-        pdbheader.num_records, \
-            = struct.unpack('>32sHHLLLLLL4s4sLLH', stream.read(78))
+    # record offsets and lengths
+    records = []
+    start = struct.unpack('>LBBBB', stream.read(8))[0]
+    for n in range(1, pdbheader.num_records):
+        next_start = struct.unpack('>LBBBB', stream.read(8))[0]
+        records.append((start, next_start - start))
+        start = next_start
+    stream.seek(0, 2)
+    end = stream.tell()
+    records.append((start, end - start))
+    pdbheader.records = records
 
-        # record offsets and lengths
-        records = []
-        start = struct.unpack('>LBBBB', stream.read(8))[0]
-        for n in range(1, pdbheader.num_records):
-            next_start = struct.unpack('>LBBBB', stream.read(8))[0]
-            records.append((start, next_start - start))
-            start = next_start
-        stream.seek(0, 2)
-        end = stream.tell()
-        records.append((start, end - start))
-        pdbheader.records = records
+    # Clean up some of the fields
+    pdbheader.name = re.sub('[^-A-Za-z0-9\'";:,. ]+', '_', pdbheader.name.replace('\x00', ''))
 
-        # Clean up some of the fields
-        pdbheader.name = re.sub('[^-A-Za-z0-9\'";:,. ]+', '_', pdbheader.name.replace('\x00', ''))
-
-        return pdbheader
+    return pdbheader
 
 ##############################################################################
 
@@ -174,71 +172,67 @@ class PDBParser (FileParser):
 #
 #
 
-class EReaderParser (PDBParser):
-    
-    filetype = PDB_EREADER
+def read_ereader_metadata (filename, metadata=None):
+    if metadata is None:
+        metadata = Metadata(PDB_EREADER)
+    read_pdb_metadata(filename, metadata)
 
-    def read_metadata (self, filename, metadata=None):
-        if metadata is None:
-            metadata = Metadata(self.filetype)
-        super(EReaderParser, self).read_metadata(filename, metadata)
+    offset, length = metadata.pdb.records[0]
+    with closing(open(filename, 'rb')) as stream:
+        stream.seek(offset)
+        raw = stream.read(length)
 
-        offset, length = metadata.pdb.records[0]
-        with closing(open(filename, 'rb')) as stream:
-            stream.seek(offset)
-            raw = stream.read(length)
+    header_size = len(raw)
+    if header_size == 132:
+        metadata.ereader = _parse_ereader_header132(raw)
+    elif header_size in (116,202):
+        metadata.ereader = _parse_ereader_header202(raw)
+    else:
+        raise EReaderException('Size mismatch. eReader header record size %s bytes is not supported' % header_size)
 
-        header_size = len(raw)
-        if header_size == 132:
-            metadata.ereader = self._parse_ereader_header132(raw)
-        elif header_size in (116,202):
-            metadata.ereader = self._parse_ereader_header202(raw)
-        else:
-            raise EReaderException('Size mismatch. eReader header record size %s bytes is not supported' % header_size)
+    return metadata
 
-        return metadata
+def _parse_ereader_header132 (raw):
+    h = Storage()
+    h.compression, \
+    _unknown1, \
+    h.encoding, \
+    h.number_small_pages, \
+    h.number_large_pages, \
+    h.non_text_records, \
+    h.number_chapters, \
+    h.number_small_index, \
+    h.number_large_index, \
+    h.number_images, \
+    h.number_links, \
+    h.metadata_available, \
+    _unknown2, \
+    h.number_footnotes, \
+    h.number_sidebars, \
+    h.chapter_index_records, \
+    h.magic_2560, \
+    h.small_page_index_record, \
+    h.large_page_index_record, \
+    h.image_data_record, \
+    h.links_record, \
+    h.metadata_record, \
+    _unknown3, \
+    h.footnote_record, \
+    h.sidebar_record, \
+    h.last_data_record, \
+        = struct.unpack('>HLHHHHHHHHHHHHHHHHHHHHHHH', raw[:54])
 
-    def _parse_ereader_header132 (self, raw):
-        h = Storage()
-        h.compression, \
-        _unknown1, \
-        h.encoding, \
-        h.number_small_pages, \
-        h.number_large_pages, \
-        h.non_text_records, \
-        h.number_chapters, \
-        h.number_small_index, \
-        h.number_large_index, \
-        h.number_images, \
-        h.number_links, \
-        h.metadata_available, \
-        _unknown2, \
-        h.number_footnotes, \
-        h.number_sidebars, \
-        h.chapter_index_records, \
-        h.magic_2560, \
-        h.small_page_index_record, \
-        h.large_page_index_record, \
-        h.image_data_record, \
-        h.links_record, \
-        h.metadata_record, \
-        _unknown3, \
-        h.footnote_record, \
-        h.sidebar_record, \
-        h.last_data_record, \
-            = struct.unpack('>HLHHHHHHHHHHHHHHHHHHHHHHH', raw[:54])
+    return h
 
-        return h
+def _parse_ereader_header202 (raw):
+    # Unfortunately, this header format is mostly unknown
+    h = Storage()
+    h.version, \
+    _unknown, \
+    h.non_text_records, \
+        = struct.unpack('>H6sH', raw[:10])
 
-    def _parse_ereader_header202 (self, raw):
-        # Unfortunately, this header format is mostly unknown
-        h = Storage()
-        h.version, \
-        _unknown, \
-        h.non_text_records, \
-            = struct.unpack('>H6sH', raw[:10])
-
-        return h
+    return h
 
 ##############################################################################
 
@@ -256,36 +250,32 @@ class EReaderParser (PDBParser):
 # 10     2     Record size          max size of each text record, always 4096
 # 12     4     Current position     current reading position, offset into uncompressed text
 
-class PalmDOCParser (PDBParser):
+def read_palmdoc_metadata (filename, metadata=None):
+    if metadata is None:
+        metadata = Metadata(PDB_PALMDOC)
+    read_pdb_metadata(filename, metadata)
 
-    filetype = PDB_PALMDOC
+    offset, length = metadata.pdb.records[0]
+    with closing(open(filename, 'rb')) as stream:
+        stream.seek(offset)
+        raw = stream.read(length)
 
-    def read_metadata (self, filename, metadata=None):
-        if metadata is None:
-            metadata = Metadata(self.filetype)
-        super(PalmDOCParser, self).read_metadata(filename, metadata)
+    metadata.palmdoc = _parse_palmdoc_header(raw)
 
-        offset, length = metadata.pdb.records[0]
-        with closing(open(filename, 'rb')) as stream:
-            stream.seek(offset)
-            raw = stream.read(length)
+    return metadata
 
-        metadata.palmdoc = self._parse_palmdoc_header(raw)
+def _parse_palmdoc_header (raw):
+    h = Storage()
 
-        return metadata
+    h.compression, \
+    _unused, \
+    h.text_length, \
+    h.record_count, \
+    h.record_size, \
+    h.current_position, \
+        = struct.unpack('>HHLHHL', raw[0:0x10])
 
-    def _parse_palmdoc_header (self, raw):
-        h = Storage()
-
-        h.compression, \
-        _unused, \
-        h.text_length, \
-        h.record_count, \
-        h.record_size, \
-        h.current_position, \
-            = struct.unpack('>HHLHHL', raw[0:0x10])
-
-        return h
+    return h
 
 ##############################################################################
 
@@ -293,50 +283,46 @@ class PalmDOCParser (PDBParser):
 #
 #
 
-class PluckerParser (PDBParser):
+def read_plucker_metadata (filename, metadata=None):
+    if metadata is None:
+        metadata = Metadata(PDB_PLUCKER)
+    read_pdb_metadata(filename, metadata)
 
-    filetype = PDB_PLUCKER
+    offset, length = metadata.pdb.records[0]
+    with closing(open(filename, 'rb')) as stream:
+        stream.seek(offset)
+        raw = stream.read(length)
 
-    def read_metadata (self, filename, metadata=None):
-        if metadata is None:
-            metadata = Metadata(self.filetype)
-        super(PluckerParser, self).read_metadata(filename, metadata)
+    metadata.plucker = _parse_plucker_header(raw)
 
-        offset, length = metadata.pdb.records[0]
-        with closing(open(filename, 'rb')) as stream:
-            stream.seek(offset)
-            raw = stream.read(length)
+    return metadata
 
-        metadata.plucker = self._parse_plucker_header(raw)
+def _parse_plucker_header (raw):
+    h = Storage()
 
-        return metadata
+    h.uid, \
+    h.compression, \
+    h.records, \
+        = struct.unpack('>HHH', raw[0:6])
+    h.home_html = None
 
-    def _parse_plucker_header (self, raw):
-        h = Storage()
+    reserved = {}
+    for i in xrange(h.records):
+        adv = 4 * i
+        name, = struct.unpack('>H', raw[6+adv:8+adv])
+        id,   = struct.unpack('>H', raw[8+adv:10+adv])
+        reserved[id] = name
+        if name == 0:
+            h.home_html = id
+    h.reserved = reserved
 
-        h.uid, \
-        h.compression, \
-        h.records, \
-            = struct.unpack('>HHH', raw[0:6])
-        h.home_html = None
-
-        reserved = {}
-        for i in xrange(h.records):
-            adv = 4 * i
-            name, = struct.unpack('>H', raw[6+adv:8+adv])
-            id,   = struct.unpack('>H', raw[8+adv:10+adv])
-            reserved[id] = name
-            if name == 0:
-                h.home_html = id
-        h.reserved = reserved
-
-        return h
+    return h
 
 ##############################################################################
 
-# PalmDOC Format
+# Gutenpalm/ztxt Format
 #
-# PalmDOC is a standard PDB file. Record 0 contains the following additional
+# Gutenpalm/ztxt is a standard PDB file. Record 0 contains the following additional
 # metadata:
 #
 # Offset Bytes Field                Comments
@@ -354,46 +340,44 @@ class PluckerParser (PDBParser):
 # 20     4     Crc 32               CRC-32 value of text data
 # 24     8     Padding              null bytes
 
-class ZTxtParser (PDBParser):
+def read_ztxt_metadata (filename, metadata=None):
+    if metadata is None:
+        metadata = Metadata(PDB_GUTENPALM)
+    read_pdb_metadata(filename, metadata)
 
-    filetype = PDB_GUTENPALM
+    offset, length = metadata.pdb.records[0]
+    with closing(open(filename, 'rb')) as stream:
+        stream.seek(offset)
+        raw = stream.read(length)
 
-    def read_metadata (self, filename, metadata=None):
-        if metadata is None:
-            metadata = Metadata(self.filetype)
-        super(ZTxtParser, self).read_metadata(filename, metadata)
+    metadata.ztxt = _parse_ztxt_header(raw)
 
-        offset, length = metadata.pdb.records[0]
-        with closing(open(filename, 'rb')) as stream:
-            stream.seek(offset)
-            raw = stream.read(length)
+    return metadata
 
-        metadata.ztxt = self._parse_ztxt_header(raw)
-
-        return metadata
-
-    def _parse_ztxt_header (self, raw):
-        h = Storage()
-        h.version, \
-        h.record_count, \
-        h.data_size, \
-        h.record_size, \
-        h.number_bookmarks, \
-        h.bookmark_record, \
-        h.number_annotations, \
-        h.annotation_record, \
-        h.flags, \
-        _reserved, \
-        h.crc32, \
-            = struct.unpack('>HHLHHHHHBBL', raw[0:24])
-        return h
+def _parse_ztxt_header (raw):
+    h = Storage()
+    h.version, \
+    h.record_count, \
+    h.data_size, \
+    h.record_size, \
+    h.number_bookmarks, \
+    h.bookmark_record, \
+    h.number_annotations, \
+    h.annotation_record, \
+    h.flags, \
+    _reserved, \
+    h.crc32, \
+        = struct.unpack('>HHLHHHHHBBL', raw[0:24])
+    return h
 
 ##############################################################################
 
-add_parser (EReaderParser, PDB_EREADER  , builtin=True)
-add_parser (PalmDOCParser, PDB_PALMDOC  , builtin=True)
-add_parser (PluckerParser, PDB_PLUCKER  , builtin=True)
-add_parser (ZTxtParser   , PDB_GUTENPALM, builtin=True)
+def initialize_parser ():
+    return ( parser(filetype=PDB_EREADER  , reader=read_ereader_metadata, writer=None, processor=None),
+             parser(filetype=PDB_PALMDOC  , reader=read_palmdoc_metadata, writer=None, processor=None),
+             parser(filetype=PDB_PLUCKER  , reader=read_plucker_metadata, writer=None, processor=None),
+             parser(filetype=PDB_GUTENPALM, reader=read_ztxt_metadata   , writer=None, processor=None),
+           )
 
 ##############################################################################
 ## THE END

@@ -64,8 +64,11 @@ def find_pluggable (subsystem, plugtype):
         raise PlugException('Unknown subsystem: %s' % subsystem)
 
     if plugtype is None: return None
-    pluggable = __extra_pluggables[subsystem].get(plugtype)
-    if pluggable is None:
+
+    pluggable = None
+    if subsystem in __extra_pluggables:
+        pluggable = __extra_pluggables[subsystem].get(plugtype)
+    if pluggable is None and subsystem in __builtin_pluggables:
         pluggable = __builtin_pluggables[subsystem].get(plugtype)
     return pluggable
 

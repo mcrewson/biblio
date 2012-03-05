@@ -35,8 +35,6 @@ class InvalidBiblioIdentifier (BiblioIdentifierError):
 
 identifier = namedtuple('identifier', 'text binary rules')
 
-max_data_buffer_size = 0
-
 ##############################################################################
 
 def _calc_identifier_sizes (identifier):
@@ -69,9 +67,7 @@ def _calc_identifier_sizes (identifier):
 ##############################################################################
 
 def identify_stream (stream):
-    global max_data_buffer_size
-
-    data = stream.read(max_data_buffer_size)
+    data = stream.read(8192)
     current_pos = 0
 
     def test_identifier_rules (ident):
@@ -201,14 +197,8 @@ class IdentifierBuilder (object):
         return self
 
     def build (self):
-        global max_data_buffer_size
-
-        ident = identifier(text=self.text, binary=self.binary,
-                           rules=tuple(self.rules))
-
-        minsize,maxsize = _calc_identifier_sizes(ident)
-        max_data_buffer_size = max(max_data_buffer_size, maxsize)
-        return ident
+        return identifier(text=self.text, binary=self.binary,
+                          rules=tuple(self.rules))
 
 ##############################################################################
 

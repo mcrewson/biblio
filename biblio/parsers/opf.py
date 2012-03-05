@@ -19,11 +19,11 @@ from contextlib import closing
 
 from lxml import etree
 
-from biblio.metadata           import Metadata, Storage
-from biblio.identify.filetypes import OPF2
-from biblio.parsers            import add_parser
-from biblio.parsers.file       import FileParser
-from biblio.util.xmlunicode    import xml_to_unicode
+from biblio.metadata              import Metadata, Storage
+from biblio.identifiers.filetypes import OPF2
+from biblio.parsers               import parser
+from biblio.parsers.file          import read_file_metadata
+from biblio.util.xmlunicode       import xml_to_unicode
 
 ##############################################################################
 
@@ -34,19 +34,15 @@ NAMESPACES = { 'dc'      : 'http://purl.org/dc/elements/1.1',
 
 ##############################################################################
 
-class OPFParser (FileParser):
+def read_opf_metadata (filename, metadata=None):
+    if metadata is None:
+        metadata = Metadata(OPF2)
+    read_file_metadata(filename, metadata)
 
-    filetype = OPF2
-    
-    def read_metadata (self, filename, metadata=None):
-        if metadata is None:
-            metadata = Metadata(self.filetype)
-        super(OPFParser, self).read_metadata(filename, metadata)
+    with closing(open(filename, 'r')) as stream:
+        metadata.opf = parse_opf_xml(stream.read())
 
-        with closing(open(filename, 'r')) as stream:
-            metadata.opf = parse_opf_xml(stream.read())
-
-        return metadata
+    return metadata
             
 ##############################################################################
 
@@ -67,7 +63,8 @@ def parse_opf_xml (rawxml):
 
 ##############################################################################
 
-add_parser(OPFParser, OPF2, builtin=True)
+def initialize_parser ():
+    return parser(filetype=OPF2, reader=read_opf_metadata, writer=None, processor=None)
 
 ##############################################################################
 ## THE END

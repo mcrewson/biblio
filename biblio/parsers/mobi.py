@@ -195,10 +195,10 @@ from __future__ import with_statement
 from contextlib import closing
 import re, struct
 
-from biblio.metadata           import Metadata, Storage
-from biblio.identify.filetypes import MOBI
-from biblio.parsers            import add_parser
-from biblio.parsers.pdb        import PDBParser, PDBException
+from biblio.metadata              import Metadata, Storage
+from biblio.identifiers.filetypes import MOBI
+from biblio.parsers               import parser
+from biblio.parsers.pdb           import PDBException, read_pdb_metadata
 
 ##############################################################################
 
@@ -207,127 +207,119 @@ class MobiException (PDBException):
 
 ##############################################################################
 
-class MOBIParser (PDBParser):
+def read_mobi_metadata (filename, metadata=None):
+    if metadata is None:
+        metadata = Metadata(MOBI)
+    read_pdb_metadata(filename, metadata)
 
-    filetype = MOBI
-
-    def read_ebook_metadata (self, filename, raw_metadata=None):
-        if raw_metadata is None:
-            raw_metadata = self.read_metadata(filename)
-
-    def read_metadata (self, filename, metadata=None):
-        if metadata is None:
-            metadata = Metadata(self.filetype)
-        super(MOBIParser, self).read_metadata(filename, metadata)
-
-        if metadata.pdb.num_records < 2:
-            # No mobi header record !?
-            return metadata
-
-        offset, length = metadata.pdb.records[0]
-        with closing(open(filename, 'rb')) as stream:
-            stream.seek(offset)
-            raw = stream.read(length)
-
-        metadata.mobi = self._parse_mobi_header(raw)
-
+    if metadata.pdb.num_records < 2:
+        # No mobi header record !?
         return metadata
 
-    def _parse_mobi_header (self, raw):
-        mobiheader = Storage()
+    offset, length = metadata.pdb.records[0]
+    with closing(open(filename, 'rb')) as stream:
+        stream.seek(offset)
+        raw = stream.read(length)
 
-        mobiheader.compression, \
-        _unused, \
-        mobiheader.text_length, \
-        mobiheader.record_count, \
-        mobiheader.record_size, \
-        mobiheader.encryption, \
-        _unknown, \
-            = struct.unpack('>HHLHHHH', raw[0:0x10])
+    metadata.mobi = _parse_mobi_header(raw)
 
-        # Some ancient MOBI files have no more metadata than this
-        if len(raw) <= 16:
-            return mobiheader
+    return metadata
 
-        mobiheader.identifier, \
-        mobiheader.header_length, \
-        mobiheader.mobi_type, \
-        mobiheader.text_encoding, \
-        mobiheader.unique_id, \
-        mobiheader.file_version, \
-        mobiheader.ortographic_index_record, \
-        mobiheader.inflection_index_record, \
-        mobiheader.index_names_record, \
-        mobiheader.index_keys_record, \
-        mobiheader.extra_index0_record, \
-        mobiheader.extra_index1_record, \
-        mobiheader.extra_index2_record, \
-        mobiheader.extra_index3_record, \
-        mobiheader.extra_index4_record, \
-        mobiheader.extra_index5_record, \
-        mobiheader.first_nonbook_record, \
-        mobiheader.fullname_offset, \
-        mobiheader.fullname_length, \
-        mobiheader.locale, \
-        mobiheader.dictionary_input_language, \
-        mobiheader.dictionary_output_language, \
-        mobiheader.min_version, \
-        mobiheader.first_image_record, \
-        mobiheader.huffman_record, \
-        mobiheader.huffman_record_count, \
-        mobiheader.huffman_table_record, \
-        mobiheader.huffman_table_length, \
-        mobiheader.exth_flags, \
-            = struct.unpack('>4sLLLLLLLLLLLLLLLLLLLLLLLLLLLL', raw[0x10:0x84])
+def _parse_mobi_header (raw):
+    mobiheader = Storage()
 
-        if len(raw) >= 0xb4:
-            mobiheader.drm_offset, \
-            mobiheader.drm_count, \
-            mobiheader.drm_size, \
-            mobiheader.drm_flags, \
-                = struct.unpack('>LLLL', raw[0xa4:0xb4])
+    mobiheader.compression, \
+    _unused, \
+    mobiheader.text_length, \
+    mobiheader.record_count, \
+    mobiheader.record_size, \
+    mobiheader.encryption, \
+    _unknown, \
+        = struct.unpack('>HHLHHHH', raw[0:0x10])
 
-        if mobiheader.header_length < 0xe4 or \
-           mobiheader.header_length > 0xf8:
-            mobiheader.extra_flags = 0
-        else:
-            mobiheader.extra_flags, = struct.unpack('>H', raw[0xf2:0xf4])
-
-        fullname_end = mobiheader.fullname_offset + mobiheader.fullname_length
-        if fullname_end < len(raw):
-            mobiheader.fullname = raw[mobiheader.fullname_offset:fullname_end]
-        else:
-            mobiheader.fullname = None
-
-        if mobiheader.exth_flags & 0x40:
-            mobiheader.exth = self._parse_exth_header(raw[16 + mobiheader.header_length:])
-
+    # Some ancient MOBI files have no more metadata than this
+    if len(raw) <= 16:
         return mobiheader
 
-    def _parse_exth_header (self, raw):
-        exth = Storage()
+    mobiheader.identifier, \
+    mobiheader.header_length, \
+    mobiheader.mobi_type, \
+    mobiheader.text_encoding, \
+    mobiheader.unique_id, \
+    mobiheader.file_version, \
+    mobiheader.ortographic_index_record, \
+    mobiheader.inflection_index_record, \
+    mobiheader.index_names_record, \
+    mobiheader.index_keys_record, \
+    mobiheader.extra_index0_record, \
+    mobiheader.extra_index1_record, \
+    mobiheader.extra_index2_record, \
+    mobiheader.extra_index3_record, \
+    mobiheader.extra_index4_record, \
+    mobiheader.extra_index5_record, \
+    mobiheader.first_nonbook_record, \
+    mobiheader.fullname_offset, \
+    mobiheader.fullname_length, \
+    mobiheader.locale, \
+    mobiheader.dictionary_input_language, \
+    mobiheader.dictionary_output_language, \
+    mobiheader.min_version, \
+    mobiheader.first_image_record, \
+    mobiheader.huffman_record, \
+    mobiheader.huffman_record_count, \
+    mobiheader.huffman_table_record, \
+    mobiheader.huffman_table_length, \
+    mobiheader.exth_flags, \
+        = struct.unpack('>4sLLLLLLLLLLLLLLLLLLLLLLLLLLLL', raw[0x10:0x84])
 
-        exth.identifier, \
-        exth.header_length, \
-        exth.record_count, \
-            = struct.unpack('>4sLL', raw[:12])
+    if len(raw) >= 0xb4:
+        mobiheader.drm_offset, \
+        mobiheader.drm_count, \
+        mobiheader.drm_size, \
+        mobiheader.drm_flags, \
+            = struct.unpack('>LLLL', raw[0xa4:0xb4])
 
-        exthdata = raw[12:]
-        pos = 0
+    if mobiheader.header_length < 0xe4 or \
+       mobiheader.header_length > 0xf8:
+        mobiheader.extra_flags = 0
+    else:
+        mobiheader.extra_flags, = struct.unpack('>H', raw[0xf2:0xf4])
 
-        records = []
-        records_left = exth.record_count
-        while records_left > 0:
-            records_left -= 1
-            record = Storage()
-            record.type, \
-            record.length, \
-                = struct.unpack('>LL', exthdata[pos:pos + 8])
-            record.data = exthdata[pos+8:pos+record.length]
-            pos += record.length
-            records.append(record)
-        exth.records = records
-        return exth
+    fullname_end = mobiheader.fullname_offset + mobiheader.fullname_length
+    if fullname_end < len(raw):
+        mobiheader.fullname = raw[mobiheader.fullname_offset:fullname_end]
+    else:
+        mobiheader.fullname = None
+
+    if mobiheader.exth_flags & 0x40:
+        mobiheader.exth = _parse_exth_header(raw[16 + mobiheader.header_length:])
+
+    return mobiheader
+
+def _parse_exth_header (raw):
+    exth = Storage()
+
+    exth.identifier, \
+    exth.header_length, \
+    exth.record_count, \
+        = struct.unpack('>4sLL', raw[:12])
+
+    exthdata = raw[12:]
+    pos = 0
+
+    records = []
+    records_left = exth.record_count
+    while records_left > 0:
+        records_left -= 1
+        record = Storage()
+        record.type, \
+        record.length, \
+            = struct.unpack('>LL', exthdata[pos:pos + 8])
+        record.data = exthdata[pos+8:pos+record.length]
+        pos += record.length
+        records.append(record)
+    exth.records = records
+    return exth
 
 ##############################################################################
 
@@ -347,7 +339,8 @@ class MOBIEbook (object):
 
 ##############################################################################
 
-add_parser (MOBIParser, MOBIEbook, MOBI, builtin=True)
+def initialize_parser ():
+    return parser(filetype=MOBI, reader=read_mobi_metadata, writer=None, processor=None)
 
 ##############################################################################
 ## THE END

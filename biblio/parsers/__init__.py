@@ -14,48 +14,87 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections import namedtuple
+
 from biblio.identifiers import identify_file
-
-##############################################################################
-
-__builtin_parsers = {}
-__extra_parsers   = {}
+from biblio.plugs       import find_pluggable, PARSERS
 
 ##############################################################################
 
 class ParserException (Exception):
     pass
 
+parser = namedtuple('parser', 'filetype reader writer processor')
+
+ALL_PARSERS = [ 'epub','mobi','pdb','opf' ]
+
 ##############################################################################
 
 def find_parser (filetype):
-    global __builtin_parsers, __extra_parsers
+    return find_pluggable(PARSERS, filetype)
 
-    if filetype is None: return None
-    parser = __extra_parsers.get(filetype)
-    if parser is None:
-        parser = __builtin_parsers.get(filetype)
-    return parser
+def read_metadata (filename):
+    filetype = identify_file(filename)
+    if filetype is None:
+        return None
+
+    parser = find_parser(filetype)
+    return parser.reader(filename)
+
+def read_processed_metadta (filename):
+    filetype = identify_file(filename)
+    if filetype is None:
+        return None
+
+    parser = find_parser(filetype)
+    return parser.processor(parser.reader(filename))
+
+def write_metadata (filename, metadata):
+    filetype = identify_file(filename)
+    if filetype is None:
+        raise ParserException('Unknown file type: %s' % filename)
+
+    if filetype != metadata.filetype:
+        raise ParserException('Metadata is not for this file type: %s' % filename)
+
+    parser = find_parser(filetype)
+    if parser.writer is None:
+        raise ParserException('Cannot write metadata for this file type: %s' % filename)
+
+    return parser.writer(filename, metadata)
 
 ##############################################################################
 
-def add_parser (parser, filetype, builtin=False):
-    global __builtin_parsers, __extra_parsers
+def initialize_builtin_pluggables (add):
+    global ALL_PARSERS
 
-    if builtin:
-        parsers = __builtin_parsers
-    else:
-        parsers = __extra_parsers
+    import imp
 
-    parsers[filetype] = parser
+    for pluggable in ALL_PARSERS:
+        try:
+            fp, path, desc = imp.find_module(pluggable, __path__)
+        except ImportError:
+            continue
+        try:
+            try:
+                module = imp.load_module('%s.%s' % (__name__, pluggable), fp, path, desc)
+            except ImportError:
+                import traceback
+                traceback.print_exc()
+                continue
+        finally:
+            if fp: fp.close()
 
-##############################################################################
-
-def donot_call_anymore ():
-    import biblio.parsers.epub
-    import biblio.parsers.mobi
-    import biblio.parsers.pdb
-    import biblio.parsers.opf
+        initializer = getattr(module, 'initialize_parser', None)
+        if initializer is None or not callable(initializer):
+            continue
+        
+        parsers = initializer()
+        if type(parsers) in (list,tuple):
+            for p in parsers:
+                add(p.filetype, p)
+        else:
+            add(parsers.filetype, parsers)
 
 ##############################################################################
 ## THE END

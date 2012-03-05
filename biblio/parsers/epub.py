@@ -20,11 +20,11 @@ from zipfile    import ZipFile, BadZipfile
 
 from lxml import etree
 
-from biblio.metadata           import Metadata
-from biblio.identify.filetypes import EPUB2, OPF2
-from biblio.parsers            import add_parser, ParserException
-from biblio.parsers.file       import FileParser
-from biblio.parsers.opf        import parse_opf_xml
+from biblio.metadata              import Metadata
+from biblio.identifiers.filetypes import EPUB2, OPF2
+from biblio.parsers               import ParserException, parser
+from biblio.parsers.file          import read_file_metadata
+from biblio.parsers.opf           import parse_opf_xml
 
 ##############################################################################
 
@@ -35,49 +35,43 @@ CONTAINER_PATH = 'META-INF/container.xml'
 
 ##############################################################################
 
-class EPubParser (FileParser):
+def read_epub_metadata (filename, metadata=None):
+    if metadata is None:
+        metadata = Metadata(EPUB2)
+    read_file_metadata(filename, metadata)
 
-    filetype = EPUB2
-    
-    def read_metadata (self, filename, metadata=None):
-        if metadata is None:
-            metadata = Metadata(self.filetype)
-        super(EPubParser, self).read_metadata(filename, metadata)
+    reader = zip_reader(filename)
 
-        reader = zip_reader(filename)
+    try:
+        container = _parse_container_xml(reader(CONTAINER_PATH))
+    except KeyError:
+        raise EPubException('missing OCF container.xml')
 
-        try:
-            container = self._parse_container_xml(reader(CONTAINER_PATH))
-        except KeyError:
-            raise EPubException('missing OCF container.xml')
+    try:
+        metadata.opf = parse_opf_xml(reader(container[OPF2.mimetype]))
+    except KeyError:
+        raise EPubException('missing OPF package file')
 
-        try:
-            metadata.opf = parse_opf_xml(reader(container[OPF2.mimetype]))
-        except KeyError:
-            raise EPubException('missing OPF package file')
-
-        return metadata
-            
-    def _parse_container_xml (self, rawxml):
-        if not rawxml: return
-
-        tree = etree.fromstring(rawxml)
-        rootfiles = tree.xpath('/ns:container/ns:rootfiles/ns:rootfile', 
-                               namespaces={'ns':'urn:oasis:names:tc:opendocument:xmlns:container'})
-        if not rootfiles:
-            raise EPubException("Invalid container.xml")
-
-        container_files = {}
-        for rootfile in rootfiles:
-            try:
-                container_files[rootfile.attrib['media-type']] = rootfile.attrib['full-path']
-            except KeyError:
-                raise EPubException("<rootfile/> element malformed")
-
-        return container_files
+    return metadata
         
-##############################################################################
+def _parse_container_xml (rawxml):
+    if not rawxml: return
 
+    tree = etree.fromstring(rawxml)
+    rootfiles = tree.xpath('/ns:container/ns:rootfiles/ns:rootfile', 
+                           namespaces={'ns':'urn:oasis:names:tc:opendocument:xmlns:container'})
+    if not rootfiles:
+        raise EPubException("Invalid container.xml")
+
+    container_files = {}
+    for rootfile in rootfiles:
+        try:
+            container_files[rootfile.attrib['media-type']] = rootfile.attrib['full-path']
+        except KeyError:
+            raise EPubException("<rootfile/> element malformed")
+
+    return container_files
+        
 def zip_reader (stream, mode='r'):
     try:
         archive = ZipFile(stream, mode)
@@ -91,7 +85,8 @@ def zip_reader (stream, mode='r'):
 
 ##############################################################################
 
-add_parser(EPubParser, EPUB2, builtin=True)
+def initialize_parser ():
+    return parser(filetype=EPUB2, reader=read_epub_metadata, writer=None, processor=None)
 
 ##############################################################################
 ## THE END
