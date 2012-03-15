@@ -20,11 +20,11 @@ from zipfile    import ZipFile, BadZipfile
 
 from lxml import etree
 
-from biblio.metadata              import Metadata
+from biblio.metadata              import Metadata, EbookMetadata
 from biblio.identifiers.filetypes import EPUB2, OPF2
 from biblio.parsers               import ParserException, parser
 from biblio.parsers.file          import read_file_metadata
-from biblio.parsers.opf           import parse_opf_xml
+from biblio.parsers.opf           import parse_opf_xml, process_opf_metadata
 
 ##############################################################################
 
@@ -85,8 +85,22 @@ def zip_reader (stream, mode='r'):
 
 ##############################################################################
 
+def process_epub_metadata (metadata):
+    ebook = EbookMetadata(metadata.filetype)
+
+    if 'opf' not in metadata:
+        return ebook
+
+    process_opf_metadata(metadata.opf, ebook)
+    return ebook
+
+##############################################################################
+
 def initialize_parser ():
-    return parser(filetype=EPUB2, reader=read_epub_metadata, writer=None, processor=None)
+    return parser(filetype=EPUB2, 
+                  reader=read_epub_metadata, 
+                  writer=None, 
+                  processor=process_epub_metadata)
 
 ##############################################################################
 ## THE END

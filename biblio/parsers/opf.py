@@ -63,6 +63,50 @@ def parse_opf_xml (rawxml):
 
 ##############################################################################
 
+def process_opf_metadata (metadata, ebook):
+    for tag,attribs,text in metadata.metadata:
+        if tag == '{http://purl.org/dc/elements/1.1/}title':
+            ebook.title = text.strip()
+        elif tag == '{http://purl.org/dc/elements/1.1/}publisher':
+            ebook.publisher = text.strip()
+        elif tag == '{http://purl.org/dc/elements/1.1/}date':
+            from biblio.ebook import parse_ebook_date
+            ebook.date_published = parse_ebook_date(text.strip())
+        elif tag == '{http://purl.org/dc/elements/1.1/}description':
+            ebook.description = text.strip()
+        elif tag == '{http://purl.org/dc/elements/1.1/}rights':
+            ebook.rights = text.strip()
+        elif tag == '{http://purl.org/dc/elements/1.1/}language':
+            ebook.setdefault('languages', []).append(text.strip())
+        elif tag == '{http://purl.org/dc/elements/1.1/}subject':
+            if text and text.strip():
+                ebook.setdefault('tags', []).extend([ x.strip() for x in text.split(',')])
+        elif tag == '{http://purl.org/dc/elements/1.1/}identifier':
+            if text and text.strip():
+                for attr,val in attribs.iteritems():
+                    if attr.endswith('scheme'):
+                        typ = val.lower()
+                        ebook.setdefault('identifiers', {})[typ] = text.strip()
+        elif tag == '{http://purl.org/dc/elements/1.1/}creator':
+            if ('role' in attribs and attribs['role'] == 'aut') or \
+               ('{http://www.idpf.org/2007/opf}role' in attribs and 
+                attribs['{http://www.idpf.org/2007/opf}role'] == 'aut') or \
+               ('role' not in attribs and 
+                '{http://www.idpf.org/2007/opf}role' not in attribs):
+                from biblio.ebook import parse_ebook_authors
+                ebook.setdefault('authors', []).extend(parse_ebook_authors(text))
+        elif tag == '{http://www.idpf.org/2007/opf}meta':
+            if not ('name' in attribs and 'content' in attribs): continue
+            name = attribs['name']
+            content = attribs['content']
+            if name == 'calibre:series':
+                ebook.series = content.strip()
+            elif name == 'calibre:series_index':
+                ebook.series_index = float(content.strip())
+
+    return ebook
+
+##############################################################################
 def initialize_parser ():
     return parser(filetype=OPF2, reader=read_opf_metadata, writer=None, processor=None)
 
